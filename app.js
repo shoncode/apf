@@ -572,7 +572,9 @@ const DBEngine = {
     
     try {
       const config = JSON.parse(syncConfig.config_string);
-      firebase.initializeApp(config);
+      if (firebase.apps.length === 0) {
+        firebase.initializeApp(config);
+      }
       firebaseDB = firebase.firestore();
       isFirebaseSyncActive = true;
       console.log("Firebase initialisé avec succès !");
@@ -1203,6 +1205,7 @@ function applyMembersFilters() {
   const deptFilter = document.getElementById('filter-departement').value;
   const cellFilter = document.getElementById('filter-cellule').value;
   const baptFilter = document.getElementById('filter-bapteme').value;
+  const searchQuery = document.getElementById('quick-search-input').value.toLowerCase().trim();
   
   let filtered = allMembers.filter(mbr => {
     if (statFilter && mbr.statut !== statFilter) return false;
@@ -1211,6 +1214,15 @@ function applyMembersFilters() {
     if (cellFilter && mbr.appartenance.cellule_id !== cellFilter) return false;
     if (baptFilter === 'oui' && !mbr.parcours_spirituel.date_bapteme_eau) return false;
     if (baptFilter === 'non' && mbr.parcours_spirituel.date_bapteme_eau) return false;
+    
+    if (searchQuery) {
+      const matchSearch = mbr.nom.toLowerCase().includes(searchQuery) || 
+                          mbr.prenoms.toLowerCase().includes(searchQuery) || 
+                          (mbr.telephone && mbr.telephone.includes(searchQuery)) ||
+                          (mbr.adresse && mbr.adresse.toLowerCase().includes(searchQuery));
+      if (!matchSearch) return false;
+    }
+    
     return true;
   });
   
@@ -1310,6 +1322,44 @@ function calculateAge(dobString) {
   return Math.abs(ageDate.getUTCFullYear() - 1970);
 }
 
+function formatDateFriendly(dateString) {
+  if (!dateString) return "--";
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) return "--";
+  return date.toLocaleDateString('fr-FR');
+}
+
+function compressImage(base64Str, maxWidth, maxHeight, quality, callback) {
+  const img = new Image();
+  img.src = base64Str;
+  img.onload = function() {
+    let width = img.width;
+    let height = img.height;
+    
+    if (width > height) {
+      if (width > maxWidth) {
+        height = Math.round((height * maxWidth) / width);
+        width = maxWidth;
+      }
+    } else {
+      if (height > maxHeight) {
+        width = Math.round((width * maxHeight) / height);
+        height = maxHeight;
+      }
+    }
+    
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, width, height);
+    
+    const compressedBase64 = canvas.toDataURL('image/jpeg', quality);
+    callback(compressedBase64);
+  };
+}
+
 // --- FICHE DETALLÉE MEMBRE ---
 function openMemberDetails(memberId) {
   activeMemberId = memberId;
@@ -1346,23 +1396,23 @@ function openMemberDetails(memberId) {
   // Remplir l'onglet 1 : Général & Relations
   document.getElementById('detail-marital').innerText = mbr.situation_matrimoniale || 'Célibataire';
   document.getElementById('detail-profession').innerText = mbr.profession || 'Sans profession';
-  document.getElementById('detail-dob').innerText = mbr.date_naissance ? new Date(mbr.date_naissance).toLocaleDateString('fr-FR') : '--';
-  document.getElementById('detail-date-integration').innerText = mbr.date_integration ? new Date(mbr.date_integration).toLocaleDateString('fr-FR') : '--';
+  document.getElementById('detail-dob').innerText = formatDateFriendly(mbr.date_naissance);
+  document.getElementById('detail-date-integration').innerText = formatDateFriendly(mbr.date_integration);
   
   // Générer l'arbre familial visuel
   renderFamilyTree(mbr);
   
   // Remplir l'onglet 2 : Parcours Spirituel
   document.getElementById('detail-conversion').innerText = mbr.parcours_spirituel.date_conversion 
-    ? `Le ${new Date(mbr.parcours_spirituel.date_conversion).toLocaleDateString('fr-FR')} à ${mbr.parcours_spirituel.lieu_conversion || '--'}`
+    ? `Le ${formatDateFriendly(mbr.parcours_spirituel.date_conversion)} à ${mbr.parcours_spirituel.lieu_conversion || '--'}`
     : 'Non communiquée';
     
   document.getElementById('detail-bapteme-eau').innerText = mbr.parcours_spirituel.date_bapteme_eau 
-    ? `Le ${new Date(mbr.parcours_spirituel.date_bapteme_eau).toLocaleDateString('fr-FR')} par ${mbr.parcours_spirituel.celebrant_bapteme_eau || 'un célébrant'}`
+    ? `Le ${formatDateFriendly(mbr.parcours_spirituel.date_bapteme_eau)} par ${mbr.parcours_spirituel.celebrant_bapteme_eau || 'un célébrant'}`
     : 'Non baptisé(e) d\'eau';
     
   document.getElementById('detail-bapteme-esprit').innerText = mbr.parcours_spirituel.date_bapteme_esprit 
-    ? `Le ${new Date(mbr.parcours_spirituel.date_bapteme_esprit).toLocaleDateString('fr-FR')}`
+    ? `Le ${formatDateFriendly(mbr.parcours_spirituel.date_bapteme_esprit)}`
     : 'Non baptisé(e) du Saint-Esprit';
     
   const cellObj = cells.find(c => c.id === mbr.appartenance.cellule_id);
@@ -1582,7 +1632,7 @@ function renderMemberAttendanceHistory(member) {
     
     const row = document.createElement('tr');
     row.innerHTML = `
-      <td>${new Date(c.date).toLocaleDateString('fr-FR')}</td>
+      <td>${formatDateFriendly(c.date)}</td>
       <td><strong>${c.type}</strong></td>
       <td>${c.theme}</td>
       <td>
@@ -1665,7 +1715,7 @@ function renderMemberFinancesHistory(member) {
   sorted.forEach(c => {
     const row = document.createElement('tr');
     row.innerHTML = `
-      <td>${new Date(c.date).toLocaleDateString('fr-FR')}</td>
+      <td>${formatDateFriendly(c.date)}</td>
       <td><span class="absent-badge" style="background:var(--success-bg); color:var(--success-color);">${c.type}</span></td>
       <td><strong>${c.montant.toLocaleString('fr-FR')} FCFA</strong></td>
       <td>${c.details || '--'}</td>
@@ -1802,9 +1852,11 @@ function handlePhotoUpload(event) {
   if (file) {
     const reader = new FileReader();
     reader.onload = function(e) {
-      document.getElementById('form-avatar-preview-container').innerHTML = `<img src="${e.target.result}" style="width:100%; height:100%; object-fit:cover;">`;
-      // Stocker l'image encodée temporairement sur le formulaire
-      document.getElementById('form-avatar-preview-container').setAttribute('data-photo-url', e.target.result);
+      // Compresser l'image pour éviter les dépassements de taille Firestore (max 1Mo) et optimiser la bande passante
+      compressImage(e.target.result, 160, 160, 0.75, function(compressedData) {
+        document.getElementById('form-avatar-preview-container').innerHTML = `<img src="${compressedData}" style="width:100%; height:100%; object-fit:cover;">`;
+        document.getElementById('form-avatar-preview-container').setAttribute('data-photo-url', compressedData);
+      });
     };
     reader.readAsDataURL(file);
   }
@@ -1968,7 +2020,7 @@ function initVisitorsView() {
       <p style="font-size:11px; font-style:italic; color:var(--text-muted); margin-top:4px;">"${v.observations || 'Aucune observation'}"</p>
       ${stepsCheckboxesHtml}
       <div class="visitor-actions">
-        <span style="font-size:10px; color:var(--text-muted);">Depuis le ${new Date(v.date_visite).toLocaleDateString('fr-FR')}</span>
+        <span style="font-size:10px; color:var(--text-muted);">Depuis le ${formatDateFriendly(v.date_visite)}</span>
         <div style="display:flex; gap:6px;">
           <button class="action-icon-btn" onclick="promoteVisitorToMember('${v.id}')" title="Intégrer comme membre complet"><i class="fa-solid fa-user-check"></i> Intégrer</button>
           <button class="action-icon-btn" onclick="deleteVisitor('${v.id}')" style="background:var(--danger-bg); color:var(--danger-color); border:none;" title="Supprimer la fiche"><i class="fa-solid fa-trash"></i></button>
@@ -2123,7 +2175,7 @@ function renderCultsList() {
     
     const row = document.createElement('tr');
     row.innerHTML = `
-      <td><strong>${new Date(c.date).toLocaleDateString('fr-FR')} à ${c.heure}</strong></td>
+      <td><strong>${formatDateFriendly(c.date)} à ${c.heure}</strong></td>
       <td>${c.type}</td>
       <td>${c.theme}</td>
       <td>${predName}</td>
@@ -2233,7 +2285,7 @@ function openCultBuilder(cultId) {
   document.getElementById('cults-list-table-body').closest('.card-panel').previousElementSibling.style.display = 'none'; // filters
   document.getElementById('cult-details-builder-container').style.display = 'block';
   
-  document.getElementById('builder-service-title').innerText = `${cult.type} — ${new Date(cult.date).toLocaleDateString('fr-FR')}`;
+  document.getElementById('builder-service-title').innerText = `${cult.type} — ${formatDateFriendly(cult.date)}`;
   document.getElementById('builder-service-theme').innerText = `Thème : ${cult.theme} (${cult.verset_cle || 'Sans verset clé'})`;
   
   // 1. Remplir le tableau des segments de liturgie
@@ -2453,7 +2505,7 @@ function renderFinancesLedger() {
     
     const row = document.createElement('tr');
     row.innerHTML = `
-      <td>${new Date(c.date).toLocaleDateString('fr-FR')}</td>
+      <td>${formatDateFriendly(c.date)}</td>
       <td><strong>${donorName}</strong></td>
       <td><span class="absent-badge" style="background:var(--success-bg); color:var(--success-color);">${c.type}</span></td>
       <td><strong>${c.montant.toLocaleString('fr-FR')} FCFA</strong></td>
@@ -2553,7 +2605,7 @@ function initResourcesView() {
   const cultSelect = document.getElementById('form-rev-cult');
   cultSelect.innerHTML = "";
   cults.filter(c => c.statut !== 'Terminé').forEach(c => {
-    cultSelect.innerHTML += `<option value="${c.id}">${c.type} du ${new Date(c.date).toLocaleDateString('fr-FR')}</option>`;
+    cultSelect.innerHTML += `<option value="${c.id}">${c.type} du ${formatDateFriendly(c.date)}</option>`;
   });
   
   const resSelect = document.getElementById('form-rev-res');
@@ -2578,7 +2630,7 @@ function initResourcesView() {
           <div class="user-avatar" style="background:var(--info-bg); color:var(--info-color);"><i class="fa-solid fa-bookmark"></i></div>
           <div class="item-text">
             <h4>${rObj.nom} (x${rev.quantite})</h4>
-            <p>${cObj.type} du ${new Date(cObj.date).toLocaleDateString('fr-FR')}</p>
+            <p>${cObj.type} du ${formatDateFriendly(cObj.date)}</p>
             <p style="font-size:10px; color:var(--text-muted);">${rev.details || ''}</p>
           </div>
         </div>
@@ -2814,7 +2866,7 @@ function renderUnbaptizedMembers(members) {
       <td><strong>${m.prenoms} ${m.nom}</strong></td>
       <td>${m.sexe === 'H' ? 'Homme' : 'Femme'}</td>
       <td>${m.telephone || '--'}</td>
-      <td>${new Date(m.date_integration).toLocaleDateString('fr-FR')}</td>
+      <td>${formatDateFriendly(m.date_integration)}</td>
     `;
     tbody.appendChild(row);
   });
@@ -2850,25 +2902,14 @@ function renderGrowthTable() {
 
 // --- UTILS : RECHERCHE GLOBALE ---
 function handleQuickSearch(event) {
-  const query = event.target.value.toLowerCase().trim();
+  const query = event.target.value;
   
   if (activeView !== 'members') {
-    // Si l'utilisateur n'est pas sur la vue membres, le basculer dessus automatiquement
     switchView('members');
-    document.getElementById('quick-search-input').value = query; // Conserver la recherche
+    document.getElementById('quick-search-input').value = query; // Restorer la valeur après switchView
   }
   
-  const allMembers = DBEngine.getCollection('membres');
-  const cells = DBEngine.getCollection('cellules');
-  
-  let filtered = allMembers.filter(m => {
-    return m.nom.toLowerCase().includes(query) || 
-           m.prenoms.toLowerCase().includes(query) || 
-           (m.telephone && m.telephone.includes(query)) ||
-           (m.adresse && m.adresse.toLowerCase().includes(query));
-  });
-  
-  renderMembersDirectory(filtered, cells);
+  applyMembersFilters();
 }
 
 // --- COMMUTATION DE THEME (SOMBRE / CLAIR) ---
