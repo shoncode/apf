@@ -3271,6 +3271,58 @@ function resetAllData() {
   }
 }
 
+// --- Import / Export de la Base de Données ---
+function exportDatabaseBackup() {
+  const dataStr = localStorage.getItem('EkklesiaManagerDB');
+  if (!dataStr) {
+    showToast("Aucune donnée à sauvegarder.", "error");
+    return;
+  }
+  
+  const blob = new Blob([dataStr], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  
+  const link = document.createElement('a');
+  link.href = url;
+  const dateStr = new Date().toISOString().split('T')[0];
+  link.download = `sauvegarde_ekklesia_apf_${dateStr}.json`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+  
+  showToast("Base de données exportée avec succès !");
+}
+
+function importDatabaseBackup(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const data = JSON.parse(e.target.result);
+      
+      // Simple validation structurelle
+      if (!data.membres || !data.utilisateurs || !data.cellules) {
+        showToast("Le fichier de sauvegarde semble invalide.", "error");
+        return;
+      }
+      
+      if (confirm("Êtes-vous sûr de vouloir restaurer cette base de données ? Toutes les données actuelles de cet appareil seront écrasées par celles du fichier de sauvegarde.")) {
+        localStorage.setItem('EkklesiaManagerDB', JSON.stringify(data));
+        showToast("Base de données restaurée ! Rechargement...", "success");
+        setTimeout(() => {
+          window.location.reload();
+        }, 1200);
+      }
+    } catch (err) {
+      showToast("Erreur lors de la lecture du fichier : " + err.message, "error");
+    }
+  };
+  reader.readAsText(file);
+}
+
 // --- ATTENDANCE SYSTEM CONTROLLER ---
 let activeAttendanceCultId = null;
 
