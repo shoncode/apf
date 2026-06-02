@@ -415,7 +415,7 @@ const initialSeedData = {
     }
   ],
   
-  cultes: [
+  cults: [
     {
       id: "clt_1",
       date: "2026-05-03",
@@ -530,7 +530,11 @@ const initialSeedData = {
   ]
 };
 
-// --- MOTEUR DE PERSISTANCE LOCAL STORAGE (Offline engine) ---
+// --- MOTEUR DE PERSISTANCE LOCAL STORAGE & FIREBASE CLOUD ---
+let firebaseDB = null;
+let isFirebaseSyncActive = false;
+let isSyncingFromRemote = false;
+
 const DBEngine = {
   init: function() {
     let localData = localStorage.getItem('EkklesiaManagerDB');
@@ -554,6 +558,134 @@ const DBEngine = {
         this.save();
       }
     }
+    
+    // Initialiser la synchronisation Firebase
+    this.initFirebase();
+  },
+  
+  initFirebase: function() {
+    const syncConfig = db.firebase_sync || {};
+    if (!syncConfig.enabled || !syncConfig.config_string) {
+      console.log("Synchronisation Cloud désactivée.");
+      return;
+    }
+    
+    try {
+      const config = JSON.parse(syncConfig.config_string);
+      firebase.initializeApp(config);
+      firebaseDB = firebase.firestore();
+      isFirebaseSyncActive = true;
+      console.log("Firebase initialisé avec succès !");
+      
+      this.setupFirebaseListeners();
+    } catch (err) {
+      console.error("Échec de l'initialisation de Firebase Sync :", err);
+      showToast("Erreur de connexion Firebase. Vérifiez votre configuration JSON.", "error");
+    }
+  },
+  
+  setupFirebaseListeners: function() {
+    const collectionsToSync = ['membres', 'cults', 'visiteurs', 'contributions', 'resources', 'reservations', 'utilisateurs', 'cellules'];
+    
+    // 1. Écouter la configuration globale (préférences, départements, formations)
+    firebaseDB.collection('config').doc('global').onSnapshot(doc => {
+      if (!doc.exists) {
+        this.uploadGlobalConfigToFirebase();
+        return;
+      }
+      
+      const data = doc.data();
+      isSyncingFromRemote = true;
+      db.preferences = data.preferences || db.preferences || {};
+      db.departements = data.departements || db.departements || [];
+      db.formations = data.formations || db.formations || [];
+      localStorage.setItem('EkklesiaManagerDB', JSON.stringify(db));
+      isSyncingFromRemote = false;
+      
+      if (activeView === 'dashboard') {
+        initDashboardView();
+      }
+    }, err => console.error("Erreur d'écoute de la configuration globale :", err));
+    
+    // 2. Écouter chaque collection
+    collectionsToSync.forEach(colName => {
+      firebaseDB.collection(colName).onSnapshot(snapshot => {
+        let changesDetected = false;
+        
+        snapshot.docChanges().forEach(change => {
+          const id = change.doc.id;
+          const data = change.doc.data();
+          
+          if (!db[colName]) db[colName] = [];
+          
+          if (change.type === 'added' || change.type === 'modified') {
+            let idx = db[colName].findIndex(x => x.id === id);
+            const remoteItem = { id, ...data };
+            
+            if (idx !== -1) {
+              if (JSON.stringify(db[colName][idx]) !== JSON.stringify(remoteItem)) {
+                db[colName][idx] = remoteItem;
+                changesDetected = true;
+              }
+            } else {
+              db[colName].push(remoteItem);
+              changesDetected = true;
+            }
+          } else if (change.type === 'removed') {
+            let idx = db[colName].findIndex(x => x.id === id);
+            if (idx !== -1) {
+              db[colName].splice(idx, 1);
+              changesDetected = true;
+            }
+          }
+        });
+        
+        if (changesDetected) {
+          isSyncingFromRemote = true;
+          localStorage.setItem('EkklesiaManagerDB', JSON.stringify(db));
+          isSyncingFromRemote = false;
+          
+          console.log(`Données Cloud mises à jour pour : ${colName}. Rechargement UI.`);
+          loadViewData(activeView);
+        }
+      }, err => console.error(`Erreur d'écoute Firestore [${colName}] :`, err));
+    });
+    
+    // 3. Télécharger les données locales vers le cloud si Firestore est vide
+    this.seedCloudIfEmpty(collectionsToSync);
+  },
+  
+  uploadGlobalConfigToFirebase: function() {
+    if (!isFirebaseSyncActive || !firebaseDB) return;
+    firebaseDB.collection('config').doc('global').set({
+      preferences: db.preferences || {},
+      departements: db.departements || [],
+      formations: db.formations || []
+    }).catch(err => console.error("Erreur d'envoi de la config globale :", err));
+  },
+  
+  seedCloudIfEmpty: async function(collections) {
+    try {
+      const snapshot = await firebaseDB.collection('membres').limit(1).get();
+      if (snapshot.empty) {
+        console.log("Firestore est vide. Synchronisation initiale en cours...");
+        showToast("Synchronisation initiale : Téléversement des données vers le Cloud...", "info");
+        
+        this.uploadGlobalConfigToFirebase();
+        
+        for (const colName of collections) {
+          const items = db[colName] || [];
+          for (const item of items) {
+            const { id, ...data } = item;
+            await firebaseDB.collection(colName).doc(id).set(data);
+          }
+        }
+        
+        showToast("Données synchronisées sur le Cloud avec succès !", "success");
+      }
+    } catch (err) {
+      console.error("Erreur lors du seeding initial Cloud :", err);
+    }
   },
   
   save: function() {
@@ -569,6 +701,15 @@ const DBEngine = {
     if (!db[collection]) db[collection] = [];
     db[collection].push(item);
     this.save();
+    
+    // Envoi asynchrone vers Firestore
+    if (isFirebaseSyncActive && firebaseDB && !isSyncingFromRemote) {
+      const { id, ...data } = item;
+      firebaseDB.collection(collection).doc(id).set(data).catch(err => {
+        console.error(`Erreur insertion Firebase [${collection}] :`, err);
+      });
+    }
+    
     return item;
   },
   
@@ -577,6 +718,15 @@ const DBEngine = {
     if (idx !== -1) {
       db[collection][idx] = { ...db[collection][idx], ...updatedFields };
       this.save();
+      
+      // Envoi asynchrone vers Firestore
+      if (isFirebaseSyncActive && firebaseDB && !isSyncingFromRemote) {
+        const { id: _, ...data } = db[collection][idx];
+        firebaseDB.collection(collection).doc(id).set(data).catch(err => {
+          console.error(`Erreur modification Firebase [${collection}] :`, err);
+        });
+      }
+      
       return db[collection][idx];
     }
     return null;
@@ -587,6 +737,14 @@ const DBEngine = {
     if (idx !== -1) {
       db[collection].splice(idx, 1);
       this.save();
+      
+      // Suppression asynchrone sur Firestore
+      if (isFirebaseSyncActive && firebaseDB && !isSyncingFromRemote) {
+        firebaseDB.collection(collection).doc(id).delete().catch(err => {
+          console.error(`Erreur suppression Firebase [${collection}] :`, err);
+        });
+      }
+      
       return true;
     }
     return false;
@@ -3048,6 +3206,12 @@ function openAccountSettings() {
   if (prefs.currency) document.getElementById('settings-currency').value = prefs.currency;
   if (prefs.csv_delimiter) document.getElementById('settings-csv-delimiter').value = prefs.csv_delimiter;
   
+  // Firebase Sync Preferences
+  const firebaseSync = db.firebase_sync || {};
+  document.getElementById('settings-firebase-sync-enabled').checked = !!firebaseSync.enabled;
+  document.getElementById('settings-firebase-config').value = firebaseSync.config_string || '';
+  toggleFirebaseConfigVisibility();
+  
   // Reset to first tab
   switchSettingsTab('profil');
   
@@ -3259,6 +3423,41 @@ function savePreferences() {
   db.preferences.csv_delimiter = document.getElementById('settings-csv-delimiter').value;
   DBEngine.save();
   showToast("Préférences enregistrées.", "success");
+}
+
+function toggleFirebaseConfigVisibility() {
+  const enabled = document.getElementById('settings-firebase-sync-enabled').checked;
+  document.getElementById('firebase-config-area').style.display = enabled ? 'flex' : 'none';
+}
+
+function saveFirebaseConfiguration() {
+  const enabled = document.getElementById('settings-firebase-sync-enabled').checked;
+  const configString = document.getElementById('settings-firebase-config').value.trim();
+  
+  if (enabled && !configString) {
+    showToast("Veuillez renseigner la configuration Firebase.", "error");
+    return;
+  }
+  
+  if (enabled) {
+    try {
+      JSON.parse(configString);
+    } catch (e) {
+      showToast("La configuration Firebase n'est pas un JSON valide.", "error");
+      return;
+    }
+  }
+  
+  if (!db.firebase_sync) db.firebase_sync = {};
+  db.firebase_sync.enabled = enabled;
+  db.firebase_sync.config_string = configString;
+  
+  DBEngine.save();
+  showToast("Configuration Firebase enregistrée. Rechargement de l'application...", "success");
+  
+  setTimeout(() => {
+    window.location.reload();
+  }, 1500);
 }
 
 function resetAllData() {
