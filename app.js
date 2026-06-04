@@ -1081,7 +1081,7 @@ function renderAbsenceAlerts(members, completedCults) {
           <div class="item-avatar-group">
             <div class="user-avatar" style="width:34px; height:34px; font-size:12px;">${mbr.prenoms[0]}${mbr.nom[0]}</div>
             <div class="item-text">
-              <h4>${mbr.prenoms} ${mbr.nom}</h4>
+              <h4>${mbr.nom.toUpperCase()} ${mbr.prenoms}</h4>
               <p>${mbr.telephone || 'Aucun contact'}</p>
             </div>
           </div>
@@ -1135,7 +1135,7 @@ function renderBirthdays() {
       const item = document.createElement('div');
       item.className = 'anniversary-item';
       
-      const textMsg = encodeURIComponent(`Joyeux Anniversaire Bien-aimé(e) ${mbr.prenoms} ${mbr.nom} ! Que le Seigneur vous comble de Ses grâces à l'occasion de vos ${age} ans. Demeurez béni(e) ! - APF Lomé`);
+      const textMsg = encodeURIComponent(`Joyeux Anniversaire Bien-aimé(e) ${mbr.nom.toUpperCase()} ${mbr.prenoms} ! Que le Seigneur vous comble de Ses grâces à l'occasion de vos ${age} ans. Demeurez béni(e) ! - APF Lomé`);
       const phoneClean = mbr.whatsapp ? mbr.whatsapp.replace(/\s+/g, '') : (mbr.telephone ? mbr.telephone.replace(/\s+/g, '') : '');
       
       const actionHtml = phoneClean 
@@ -1146,7 +1146,7 @@ function renderBirthdays() {
         <div class="item-avatar-group">
           <div class="user-avatar" style="width:38px; height:38px; font-size:13px; font-weight:700;">${mbr.prenoms[0]}${mbr.nom[0]}</div>
           <div class="item-text">
-            <h4>${mbr.prenoms} ${mbr.nom}</h4>
+            <h4>${mbr.nom.toUpperCase()} ${mbr.prenoms}</h4>
             <p><i class="fa-solid fa-cake-candles" style="color:var(--warning-color);"></i> ${thisYearBday.toLocaleDateString('fr-FR', {day: 'numeric', month: 'long'})} (${age} ans)</p>
           </div>
         </div>
@@ -1300,9 +1300,9 @@ function applyMembersFilters() {
   filtered.sort((a, b) => {
     switch (sortFilter) {
       case 'name_asc':
-        return a.nom.localeCompare(b.nom) || a.prenoms.localeCompare(b.prenoms);
+        return a.nom.localeCompare(b.nom, 'fr', { sensitivity: 'base' }) || a.prenoms.localeCompare(b.prenoms, 'fr', { sensitivity: 'base' });
       case 'name_desc':
-        return b.nom.localeCompare(a.nom) || b.prenoms.localeCompare(a.prenoms);
+        return b.nom.localeCompare(a.nom, 'fr', { sensitivity: 'base' }) || b.prenoms.localeCompare(a.prenoms, 'fr', { sensitivity: 'base' });
       case 'age_asc': {
         const ageA = a.date_naissance ? calculateAge(a.date_naissance) : 999;
         const ageB = b.date_naissance ? calculateAge(b.date_naissance) : 999;
@@ -1319,7 +1319,7 @@ function applyMembersFilters() {
         return dateB - dateA;
       }
       default:
-        return a.nom.localeCompare(b.nom);
+        return a.nom.localeCompare(b.nom, 'fr', { sensitivity: 'base' }) || a.prenoms.localeCompare(b.prenoms, 'fr', { sensitivity: 'base' });
     }
   });
   
@@ -1361,10 +1361,10 @@ function renderMembersDirectory(members, cells) {
       <input type="checkbox" class="member-select-checkbox" value="${mbr.id}" onclick="event.stopPropagation(); toggleBulkDeleteBtn()" style="position: absolute; top: 12px; left: 12px; transform: scale(1.3); cursor: pointer; z-index: 10;">
       <span class="card-status-badge ${statusClass}">${mbr.statut}</span>
       <div class="card-avatar-xl">
-        <img src="${mbr.photo || generatePremiumSvgAvatar(initials, mbr.sexe, 1)}" alt="${mbr.prenoms}">
+        <img src="${mbr.photo || generatePremiumSvgAvatar(initials, mbr.sexe, 1)}" alt="${mbr.nom.toUpperCase()} ${mbr.prenoms}">
       </div>
       <div class="card-member-info">
-        <h4>${mbr.prenoms} ${mbr.nom}</h4>
+        <h4>${mbr.nom.toUpperCase()} ${mbr.prenoms}</h4>
         <p>${mbr.profession || 'Sans profession'}</p>
         <p style="font-size:11px; margin-top:2px;"><i class="fa-solid fa-house-chimney"></i> Cellule : ${cellName}</p>
       </div>
@@ -1447,7 +1447,7 @@ function openMemberDetails(memberId) {
   const initials = (mbr.prenoms[0] + mbr.nom[0]).toUpperCase();
   avatarBox.innerHTML = `<img src="${mbr.photo || generatePremiumSvgAvatar(initials, mbr.sexe, 1)}" style="width:100%; height:100%; object-fit:cover;">`;
   
-  document.getElementById('detail-full-name').innerText = `${mbr.prenoms} ${mbr.nom}`;
+  document.getElementById('detail-full-name').innerText = `${mbr.nom.toUpperCase()} ${mbr.prenoms}`;
   
   const statusBadge = document.getElementById('detail-status');
   statusBadge.innerText = mbr.statut;
@@ -1577,7 +1577,7 @@ function deleteCurrentMember() {
   const mbr = DBEngine.getCollection('membres').find(x => x.id === activeMemberId);
   if (!mbr) return;
   
-  if (confirm(`Êtes-vous sûr de vouloir supprimer définitivement ${mbr.prenoms} ${mbr.nom} ? Cette action est irréversible.`)) {
+  if (confirm(`Êtes-vous sûr de vouloir supprimer définitivement ${mbr.nom.toUpperCase()} ${mbr.prenoms} ? Cette action est irréversible.`)) {
     const success = DBEngine.delete('membres', activeMemberId);
     if (success) {
       showToast(`Le membre a été supprimé avec succès.`, "success");
@@ -1627,7 +1627,7 @@ function renderFamilyTree(member) {
         <div class="family-node spouse" onclick="openMemberDetails('${spouse.id}')" style="cursor:pointer;" title="Voir le profil du conjoint">
           <div class="family-node-avatar">${spouse.prenoms[0]}${spouse.nom[0]}</div>
           <div class="family-node-info">
-            <h5>${spouse.prenoms} ${spouse.nom}</h5>
+            <h5>${spouse.nom.toUpperCase()} ${spouse.prenoms}</h5>
             <p>Époux / Épouse</p>
           </div>
         </div>
@@ -1645,7 +1645,7 @@ function renderFamilyTree(member) {
           <div class="family-node child" onclick="openMemberDetails('${child.id}')" style="cursor:pointer;" title="Voir le profil de l'enfant">
             <div class="family-node-avatar">${child.prenoms[0]}${child.nom[0]}</div>
             <div class="family-node-info">
-              <h5>${child.prenoms} ${child.nom}</h5>
+              <h5>${child.nom.toUpperCase()} ${child.prenoms}</h5>
               <p>Enfant (${calculateAge(child.date_naissance)} ans)</p>
             </div>
           </div>
@@ -1665,7 +1665,7 @@ function renderFamilyTree(member) {
       <div class="family-node" style="border-color: var(--primary-color);">
         <div class="family-node-avatar">${member.prenoms[0]}${member.nom[0]}</div>
         <div class="family-node-info">
-          <h5>${member.prenoms} ${member.nom}</h5>
+          <h5>${member.nom.toUpperCase()} ${member.prenoms}</h5>
           <p>Membre Actif</p>
         </div>
       </div>
@@ -1812,13 +1812,13 @@ function openMemberFormModal(memberId = null) {
   const conjointSelect = document.getElementById('form-conjoint');
   conjointSelect.innerHTML = `<option value="">-- Aucun --</option>`;
   allMembers.filter(m => m.id !== memberId).forEach(m => {
-    conjointSelect.innerHTML += `<option value="${m.id}">${m.prenoms} ${m.nom}</option>`;
+    conjointSelect.innerHTML += `<option value="${m.id}">${m.nom.toUpperCase()} ${m.prenoms}</option>`;
   });
   
   const enfantsSelect = document.getElementById('form-enfants');
   enfantsSelect.innerHTML = "";
   allMembers.filter(m => m.id !== memberId).forEach(m => {
-    enfantsSelect.innerHTML += `<option value="${m.id}">${m.prenoms} ${m.nom} (${calculateAge(m.date_naissance)} ans)</option>`;
+    enfantsSelect.innerHTML += `<option value="${m.id}">${m.nom.toUpperCase()} ${m.prenoms} (${calculateAge(m.date_naissance)} ans)</option>`;
   });
   
   // Générer les checkboxes de départements
@@ -1852,7 +1852,7 @@ function openMemberFormModal(memberId = null) {
     // Mode Édition : Pré-remplir les données
     const mbr = allMembers.find(m => m.id === memberId);
     if (mbr) {
-      document.getElementById('member-modal-title').innerText = `Modifier la fiche de ${mbr.prenoms} ${mbr.nom}`;
+      document.getElementById('member-modal-title').innerText = `Modifier la fiche de ${mbr.nom.toUpperCase()} ${mbr.prenoms}`;
       document.getElementById('form-member-id').value = mbr.id;
       
       if (mbr.photo) {
@@ -2003,7 +2003,7 @@ function saveMemberForm(event) {
       payload.photo = generatePremiumSvgAvatar(initials, payload.sexe, DBEngine.getCollection('membres').length);
     }
     DBEngine.insert('membres', payload);
-    showToast(`Membre ${payload.prenoms} ${payload.nom} inséré avec succès !`);
+    showToast(`Membre ${payload.nom.toUpperCase()} ${payload.prenoms} inséré avec succès !`);
   } else {
     // Si pas de photo chargée mais qu'il y en avait déjà une, conserver l'ancienne
     const oldMbr = DBEngine.getCollection('membres').find(x => x.id === memberId);
@@ -2011,7 +2011,7 @@ function saveMemberForm(event) {
       payload.photo = oldMbr.photo;
     }
     DBEngine.update('membres', memberId, payload);
-    showToast(`Fiche de ${payload.prenoms} ${payload.nom} mise à jour !`);
+    showToast(`Fiche de ${payload.nom.toUpperCase()} ${payload.prenoms} mise à jour !`);
   }
   
   closeModal('modal-member');
@@ -2081,7 +2081,7 @@ function initVisitorsView() {
     card.innerHTML = `
       <div style="display:flex; justify-content:space-between; align-items:flex-start;">
         <div>
-          <h5>${v.prenoms} ${v.nom}</h5>
+          <h5>${v.nom.toUpperCase()} ${v.prenoms}</h5>
           <p style="font-size:11px;"><i class="fa-solid fa-phone"></i> ${v.telephone}</p>
         </div>
         <span class="absent-badge" style="background:rgba(255,255,255,0.05); color:var(--text-secondary);">${v.statut}</span>
@@ -2139,7 +2139,7 @@ function saveVisitorForm(event) {
   if (isNew) {
     payload.id = `vis_${Date.now()}`;
     DBEngine.insert('visiteurs', payload);
-    showToast(`Visiteur ${payload.prenoms} ${payload.nom} enregistré !`);
+    showToast(`Visiteur ${payload.nom.toUpperCase()} ${payload.prenoms} enregistré !`);
   } else {
     DBEngine.update('visiteurs', id, payload);
     showToast("Suivi mis à jour !");
@@ -2211,7 +2211,7 @@ function initCultsView() {
   louangeSelect.innerHTML = `<option value="">-- Sélectionner --</option>`;
   
   members.forEach(m => {
-    const opt = `<option value="${m.id}">${m.prenoms} ${m.nom}</option>`;
+    const opt = `<option value="${m.id}">${m.nom.toUpperCase()} ${m.prenoms}</option>`;
     predSelect.innerHTML += opt;
     modSelect.innerHTML += opt;
     louangeSelect.innerHTML += opt;
@@ -2236,7 +2236,7 @@ function renderCultsList() {
     if (statusFilter && c.statut !== statusFilter) return;
     
     const pred = members.find(m => m.id === c.predicateur_id);
-    const predName = pred ? `${pred.prenoms} ${pred.nom}` : (c.predicateur_id || '--');
+    const predName = pred ? `${pred.nom.toUpperCase()} ${pred.prenoms}` : (c.predicateur_id || '--');
     
     let badgeClass = "status-actif"; // Vert pour Terminé / Confirmé
     if (c.statut === 'Planifié') badgeClass = "status-info";
@@ -2384,7 +2384,7 @@ function renderProgramSegments(cult, members) {
     // Générer select intervenants
     let options = `<option value="">-- Aucun --</option>`;
     members.filter(m => m.statut === 'Actif').forEach(m => {
-      options += `<option value="${m.id}" ${m.id === item.intervenant_id ? 'selected' : ''}>${m.prenoms} ${m.nom}</option>`;
+      options += `<option value="${m.id}" ${m.id === item.intervenant_id ? 'selected' : ''}>${m.nom.toUpperCase()} ${m.prenoms}</option>`;
     });
     
     const row = document.createElement('tr');
@@ -2502,7 +2502,7 @@ function renderAttendanceChecklist(cult, members) {
     label.innerHTML = `
       <div style="display:flex; align-items:center; gap:10px;">
         <input type="checkbox" value="${m.id}" ${isPresent ? 'checked' : ''} style="width:16px; height:16px;">
-        <span>${m.prenoms} ${m.nom}</span>
+        <span>${m.nom.toUpperCase()} ${m.prenoms}</span>
       </div>
       <span class="tag-badge" style="font-size:9px;">${m.appartenance.departements[0] || 'Actif'}</span>
     `;
@@ -2529,7 +2529,7 @@ function initFinancesView() {
   const memberSelect = document.getElementById('form-finance-member');
   memberSelect.innerHTML = `<option value="">-- Sélectionner un Membre --</option>`;
   members.filter(m => m.statut === 'Actif').forEach(m => {
-    memberSelect.innerHTML += `<option value="${m.id}">${m.prenoms} ${m.nom}</option>`;
+    memberSelect.innerHTML += `<option value="${m.id}">${m.nom.toUpperCase()} ${m.prenoms}</option>`;
   });
   
   // Calculer les statistiques du mois en cours (Mai 2026)
@@ -2570,7 +2570,7 @@ function renderFinancesLedger() {
     if (typeFilter && c.type !== typeFilter) return;
     
     const donor = members.find(m => m.id === c.membre_id);
-    const donorName = donor ? `${donor.prenoms} ${donor.nom}` : 'Anonyme / Inconnu';
+    const donorName = donor ? `${donor.nom.toUpperCase()} ${donor.prenoms}` : 'Anonyme / Inconnu';
     
     const row = document.createElement('tr');
     row.innerHTML = `
@@ -2631,7 +2631,7 @@ function exportFinancesCSV() {
   let csv = "Date;Donateur;Type de Don;Montant (FCFA);Details\n";
   contributions.forEach(c => {
     const donor = members.find(m => m.id === c.membre_id);
-    const donorName = donor ? `${donor.prenoms} ${donor.nom}` : 'Inconnu';
+    const donorName = donor ? `${donor.nom.toUpperCase()} ${donor.prenoms}` : 'Inconnu';
     csv += `${c.date};${donorName};${c.type};${c.montant};${c.details || ''}\n`;
   });
   
@@ -2932,7 +2932,7 @@ function renderUnbaptizedMembers(members) {
   unbaptized.forEach(m => {
     const row = document.createElement('tr');
     row.innerHTML = `
-      <td><strong>${m.prenoms} ${m.nom}</strong></td>
+      <td><strong>${m.nom.toUpperCase()} ${m.prenoms}</strong></td>
       <td>${m.sexe === 'H' ? 'Homme' : 'Femme'}</td>
       <td>${m.telephone || '--'}</td>
       <td>${formatDateFriendly(m.date_integration)}</td>
@@ -3294,8 +3294,8 @@ function openAccountSettings() {
   // Profil tab
   document.getElementById('settings-username').value = user.identifiant;
   document.getElementById('settings-role').value = user.role;
-  document.getElementById('settings-linked-member').value = mbr ? `${mbr.prenoms} ${mbr.nom}` : 'Aucun';
-  document.getElementById('settings-fullname').innerText = mbr ? `${mbr.prenoms} ${mbr.nom}` : user.identifiant;
+  document.getElementById('settings-linked-member').value = mbr ? `${mbr.nom.toUpperCase()} ${mbr.prenoms}` : 'Aucun';
+  document.getElementById('settings-fullname').innerText = mbr ? `${mbr.nom.toUpperCase()} ${mbr.prenoms}` : user.identifiant;
   document.getElementById('settings-role-display').innerText = user.role;
   document.getElementById('settings-avatar').innerText = mbr ? (mbr.prenoms[0] + mbr.nom[0]).toUpperCase() : '??';
   document.getElementById('settings-profile-error').style.display = 'none';
@@ -3445,7 +3445,7 @@ function renderUsersList() {
   utilisateurs.forEach(u => {
     const mbr = membres.find(m => m.id === u.membre_id);
     const initials = mbr ? (mbr.prenoms[0] + mbr.nom[0]).toUpperCase() : '??';
-    const fullName = mbr ? `${mbr.prenoms} ${mbr.nom}` : 'Inconnu';
+    const fullName = mbr ? `${mbr.nom.toUpperCase()} ${mbr.prenoms}` : 'Inconnu';
     const isSelf = u.id === activeUserId;
     
     const card = document.createElement('div');
@@ -3470,7 +3470,7 @@ function openNewUserForm() {
   
   select.innerHTML = '<option value="">-- Sélectionner un membre --</option>';
   membres.filter(m => !linkedMemberIds.includes(m.id)).forEach(m => {
-    select.innerHTML += `<option value="${m.id}">${m.prenoms} ${m.nom}</option>`;
+    select.innerHTML += `<option value="${m.id}">${m.nom.toUpperCase()} ${m.prenoms}</option>`;
   });
   
   document.getElementById('new-user-id').value = '';
@@ -3695,7 +3695,7 @@ function renderAttendanceMembersList(members, presences) {
     const div = document.createElement('div');
     div.className = `attendance-item ${isPresent ? 'active' : ''}`;
     div.dataset.id = m.id;
-    div.dataset.search = `${m.prenoms.toLowerCase()} ${m.nom.toLowerCase()}`;
+    div.dataset.search = `${m.nom.toLowerCase()} ${m.prenoms.toLowerCase()}`;
     div.dataset.dept = (m.appartenance && m.appartenance.departements) ? m.appartenance.departements.join(',') : '';
     
     // Toggle logic on click of card
@@ -3717,7 +3717,7 @@ function renderAttendanceMembersList(members, presences) {
         <input type="checkbox" class="attendance-checkbox" style="display:none;" ${isPresent ? 'checked' : ''}>
         <div class="attendance-avatar">${initials}</div>
         <div>
-          <div style="font-weight:600; font-size:14px; color:var(--text-main);">${m.prenoms} ${m.nom}</div>
+          <div style="font-weight:600; font-size:14px; color:var(--text-main);">${m.nom.toUpperCase()} ${m.prenoms}</div>
           <div style="font-size:11px; color:var(--text-muted);">${dept}</div>
         </div>
       </div>
@@ -3858,7 +3858,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (user) {
       const currentMember = DBEngine.getCollection('membres').find(m => m.id === user.membre_id);
       if (currentMember) {
-        document.getElementById('current-user-name').innerText = `${currentMember.prenoms[0]}. ${currentMember.nom}`;
+        document.getElementById('current-user-name').innerText = `${currentMember.nom.toUpperCase()} ${currentMember.prenoms[0]}.`;
         const roleEl = document.getElementById('current-user-role');
         if (roleEl) roleEl.innerText = user.role;
         document.getElementById('current-user-avatar').innerText = (currentMember.prenoms[0] + currentMember.nom[0]).toUpperCase();
