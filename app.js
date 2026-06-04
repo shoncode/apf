@@ -535,8 +535,27 @@ let firebaseDB = null;
 let isFirebaseSyncActive = false;
 let isSyncingFromRemote = false;
 
+async function fetchWithTimeout(resource, options = {}) {
+  const { timeout = 1500 } = options;
+  
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  
+  try {
+    const response = await fetch(resource, {
+      ...options,
+      signal: controller.signal
+    });
+    clearTimeout(id);
+    return response;
+  } catch (error) {
+    clearTimeout(id);
+    throw error;
+  }
+}
+
 const DBEngine = {
-  init: function() {
+  init: async function() {
     let localData = localStorage.getItem('EkklesiaManagerDB');
     if (!localData) {
       // Premier lancement : Génération des avatars premium SVG pour le seed initial
@@ -560,24 +579,54 @@ const DBEngine = {
     }
     
     // Initialiser la synchronisation Firebase
-    this.initFirebase();
+    await this.initFirebase();
   },
   
-  initFirebase: function() {
-    const syncConfig = db.firebase_sync || {};
-    if (!syncConfig.enabled || !syncConfig.config_string) {
+  initFirebase: async function() {
+    let configString = null;
+    let enabled = false;
+
+    // 1. Tenter de charger le fichier firebase-config.json hébergé sur le serveur
+    try {
+      const response = await fetchWithTimeout('./firebase-config.json');
+      if (response.ok) {
+        const configJson = await response.json();
+        configString = JSON.stringify(configJson);
+        enabled = true;
+        console.log("Configuration Firebase détectée via firebase-config.json.");
+      }
+    } catch (err) {
+      console.log("Fichier firebase-config.json non disponible ou erreur réseau. Utilisation des paramètres locaux.");
+    }
+
+    // 2. Si le fichier n'est pas présent/inaccessible, utiliser le localStorage local
+    if (!configString) {
+      const syncConfig = db.firebase_sync || {};
+      enabled = syncConfig.enabled;
+      configString = syncConfig.config_string;
+    }
+    
+    if (!enabled || !configString) {
       console.log("Synchronisation Cloud désactivée.");
       return;
     }
     
     try {
-      const config = JSON.parse(syncConfig.config_string);
+      const config = JSON.parse(configString);
       if (firebase.apps.length === 0) {
         firebase.initializeApp(config);
       }
       firebaseDB = firebase.firestore();
       isFirebaseSyncActive = true;
       console.log("Firebase initialisé avec succès !");
+      
+      // Enregistrer automatiquement la configuration lue du serveur dans localStorage pour assurer la persistance
+      if (!db.firebase_sync) db.firebase_sync = {};
+      if (db.firebase_sync.config_string !== configString || !db.firebase_sync.enabled) {
+        db.firebase_sync.enabled = true;
+        db.firebase_sync.config_string = configString;
+        this.save();
+      }
       
       this.setupFirebaseListeners();
     } catch (err) {
@@ -604,43 +653,61 @@ const DBEngine = {
       localStorage.setItem('EkklesiaManagerDB', JSON.stringify(db));
       isSyncingFromRemote = false;
       
-      if (activeView === 'dashboard') {
+      if (sessionStorage.getItem('ekklesia_auth') && activeView === 'dashboard') {
         initDashboardView();
       }
     }, err => console.error("Erreur d'écoute de la configuration globale :", err));
     
     // 2. Écouter chaque collection
     collectionsToSync.forEach(colName => {
+      let isInitial = true;
       firebaseDB.collection(colName).onSnapshot(snapshot => {
         let changesDetected = false;
         
-        snapshot.docChanges().forEach(change => {
-          const id = change.doc.id;
-          const data = change.doc.data();
+        if (isInitial) {
+          // Premier snapshot complet : charger les données distantes du serveur
+          const remoteItems = [];
+          snapshot.forEach(doc => {
+            remoteItems.push({ id: doc.id, ...doc.data() });
+          });
           
-          if (!db[colName]) db[colName] = [];
-          
-          if (change.type === 'added' || change.type === 'modified') {
-            let idx = db[colName].findIndex(x => x.id === id);
-            const remoteItem = { id, ...data };
+          // Si Firestore est peuplé, on écrase les données locales (seed générique)
+          // pour éviter la duplication ou la persistance d'éléments de seed supprimés.
+          if (remoteItems.length > 0) {
+            db[colName] = remoteItems;
+            changesDetected = true;
+          }
+          isInitial = false;
+        } else {
+          // Écoutes incrémentales suivantes
+          snapshot.docChanges().forEach(change => {
+            const id = change.doc.id;
+            const data = change.doc.data();
             
-            if (idx !== -1) {
-              if (JSON.stringify(db[colName][idx]) !== JSON.stringify(remoteItem)) {
-                db[colName][idx] = remoteItem;
+            if (!db[colName]) db[colName] = [];
+            
+            if (change.type === 'added' || change.type === 'modified') {
+              let idx = db[colName].findIndex(x => x.id === id);
+              const remoteItem = { id, ...data };
+              
+              if (idx !== -1) {
+                if (JSON.stringify(db[colName][idx]) !== JSON.stringify(remoteItem)) {
+                  db[colName][idx] = remoteItem;
+                  changesDetected = true;
+                }
+              } else {
+                db[colName].push(remoteItem);
                 changesDetected = true;
               }
-            } else {
-              db[colName].push(remoteItem);
-              changesDetected = true;
+            } else if (change.type === 'removed') {
+              let idx = db[colName].findIndex(x => x.id === id);
+              if (idx !== -1) {
+                db[colName].splice(idx, 1);
+                changesDetected = true;
+              }
             }
-          } else if (change.type === 'removed') {
-            let idx = db[colName].findIndex(x => x.id === id);
-            if (idx !== -1) {
-              db[colName].splice(idx, 1);
-              changesDetected = true;
-            }
-          }
-        });
+          });
+        }
         
         if (changesDetected) {
           isSyncingFromRemote = true;
@@ -648,7 +715,9 @@ const DBEngine = {
           isSyncingFromRemote = false;
           
           console.log(`Données Cloud mises à jour pour : ${colName}. Rechargement UI.`);
-          loadViewData(activeView);
+          if (sessionStorage.getItem('ekklesia_auth')) {
+            loadViewData(activeView);
+          }
         }
       }, err => console.error(`Erreur d'écoute Firestore [${colName}] :`, err));
     });
@@ -3764,9 +3833,9 @@ function saveAttendance() {
 }
 
 // --- INITIALISATION APPLICATIVE GLOBALE ---
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
   // 1. Initialiser le moteur de persistance
-  DBEngine.init();
+  await DBEngine.init();
   
   // 2. Vérification de la session
   const activeUserId = sessionStorage.getItem('ekklesia_auth');
