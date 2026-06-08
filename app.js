@@ -554,6 +554,16 @@ async function fetchWithTimeout(resource, options = {}) {
   }
 }
 
+let uiReloadTimeout = null;
+function triggerUIReload() {
+  if (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('ekklesia_auth') && activeView) {
+    if (uiReloadTimeout) clearTimeout(uiReloadTimeout);
+    uiReloadTimeout = setTimeout(() => {
+      loadViewData(activeView);
+    }, 150);
+  }
+}
+
 const DBEngine = {
   init: async function() {
     let localData = localStorage.getItem('EkklesiaManagerDB');
@@ -602,8 +612,23 @@ const DBEngine = {
     // 2. Si le fichier n'est pas présent/inaccessible, utiliser le localStorage local
     if (!configString) {
       const syncConfig = db.firebase_sync || {};
-      enabled = syncConfig.enabled;
-      configString = syncConfig.config_string;
+      if (syncConfig.config_string) {
+        enabled = syncConfig.enabled;
+        configString = syncConfig.config_string;
+      } else {
+        // Fallback de secours pour garantir la synchronisation si fetch() échoue (ex: fichiers locaux sur mobile)
+        const fallbackConfig = {
+          apiKey: "AIzaSyCt6z4oF7ckHgnRUCAyod9KCurxPqtrWDU",
+          authDomain: "ekklesia-apf.firebaseapp.com",
+          projectId: "ekklesia-apf",
+          storageBucket: "ekklesia-apf.firebasestorage.app",
+          messagingSenderId: "276206343871",
+          appId: "1:276206343871:web:30260aff5880b173c1180a"
+        };
+        configString = JSON.stringify(fallbackConfig);
+        enabled = true;
+        console.log("Configuration de secours injectée.");
+      }
     }
     
     if (!enabled || !configString) {
@@ -671,12 +696,11 @@ const DBEngine = {
             remoteItems.push({ id: doc.id, ...doc.data() });
           });
           
-          // Si Firestore est peuplé, on écrase les données locales (seed générique)
-          // pour éviter la duplication ou la persistance d'éléments de seed supprimés.
-          if (remoteItems.length > 0) {
-            db[colName] = remoteItems;
-            changesDetected = true;
-          }
+          // On écrase systématiquement les données locales par celles de Firestore.
+          // Si la collection distante est vide, on s'assure que la collection locale l'est aussi,
+          // ce qui évite la réapparition des membres génériques ou supprimés.
+          db[colName] = remoteItems;
+          changesDetected = true;
           isInitial = false;
         } else {
           // Écoutes incrémentales suivantes
@@ -715,9 +739,7 @@ const DBEngine = {
           isSyncingFromRemote = false;
           
           console.log(`Données Cloud mises à jour pour : ${colName}. Rechargement UI.`);
-          if (sessionStorage.getItem('ekklesia_auth')) {
-            loadViewData(activeView);
-          }
+          triggerUIReload();
         }
       }, err => console.error(`Erreur d'écoute Firestore [${colName}] :`, err));
     });
@@ -737,22 +759,27 @@ const DBEngine = {
   
   seedCloudIfEmpty: async function(collections) {
     try {
-      const snapshot = await firebaseDB.collection('membres').limit(1).get();
-      if (snapshot.empty) {
-        console.log("Firestore est vide. Synchronisation initiale en cours...");
-        showToast("Synchronisation initiale : Téléversement des données vers le Cloud...", "info");
+      // Vérifier via la configuration globale si la base a déjà été initialisée
+      const configDoc = await firebaseDB.collection('config').doc('global').get();
+      if (!configDoc.exists) {
+        console.log("Nouvelle instance Firestore. Synchronisation initiale partielle en cours...");
+        showToast("Initialisation des données de base sur le Cloud...", "info");
         
         this.uploadGlobalConfigToFirebase();
         
-        for (const colName of collections) {
-          const items = db[colName] || [];
+        // On ne téléverse que les utilisateurs et les cellules pour éviter
+        // d'injecter des membres ou données génériques par erreur.
+        const collectionsToSeed = ['utilisateurs', 'cellules'];
+        
+        for (const colName of collectionsToSeed) {
+          const items = initialSeedData[colName] || [];
           for (const item of items) {
             const { id, ...data } = item;
             await firebaseDB.collection(colName).doc(id).set(data);
           }
         }
         
-        showToast("Données synchronisées sur le Cloud avec succès !", "success");
+        showToast("Initialisation Cloud terminée avec succès !", "success");
       }
     } catch (err) {
       console.error("Erreur lors du seeding initial Cloud :", err);
@@ -781,6 +808,7 @@ const DBEngine = {
       });
     }
     
+    triggerUIReload();
     return item;
   },
   
@@ -798,6 +826,7 @@ const DBEngine = {
         });
       }
       
+      triggerUIReload();
       return db[collection][idx];
     }
     return null;
@@ -816,6 +845,7 @@ const DBEngine = {
         });
       }
       
+      triggerUIReload();
       return true;
     }
     return false;
@@ -1847,6 +1877,8 @@ function openMemberFormModal(memberId = null) {
   document.getElementById('member-form').reset();
   document.getElementById('form-member-id').value = "";
   document.getElementById('form-avatar-preview-container').innerHTML = `<i class="fa-solid fa-user-tie" style="font-size:24px; color:var(--text-muted);" id="form-avatar-placeholder"></i>`;
+  document.getElementById('form-avatar-preview-container').removeAttribute('data-photo-url');
+  if (document.getElementById('btn-remove-photo')) document.getElementById('btn-remove-photo').style.display = 'none';
   
   if (memberId) {
     // Mode Édition : Pré-remplir les données
@@ -1855,8 +1887,9 @@ function openMemberFormModal(memberId = null) {
       document.getElementById('member-modal-title').innerText = `Modifier la fiche de ${mbr.nom.toUpperCase()} ${mbr.prenoms}`;
       document.getElementById('form-member-id').value = mbr.id;
       
-      if (mbr.photo) {
+      if (mbr.photo && !mbr.photo.includes('removed')) {
         document.getElementById('form-avatar-preview-container').innerHTML = `<img src="${mbr.photo}" style="width:100%; height:100%; object-fit:cover;">`;
+        if (document.getElementById('btn-remove-photo')) document.getElementById('btn-remove-photo').style.display = 'inline-flex';
       }
       
       document.getElementById('form-nom').value = mbr.nom;
@@ -1916,15 +1949,28 @@ function openMemberFormModal(memberId = null) {
   openModal('modal-member');
 }
 
+function removePhotoUpload() {
+  const previewContainer = document.getElementById('form-avatar-preview-container');
+  previewContainer.innerHTML = `<i class="fa-solid fa-user-tie" style="font-size:24px; color:var(--text-muted);" id="form-avatar-placeholder"></i>`;
+  previewContainer.setAttribute('data-photo-url', 'removed');
+  document.getElementById('form-member-photo').value = "";
+  if (document.getElementById('btn-remove-photo')) document.getElementById('btn-remove-photo').style.display = 'none';
+}
+
 function handlePhotoUpload(event) {
   const file = event.target.files[0];
   if (file) {
+    const previewContainer = document.getElementById('form-avatar-preview-container');
+    previewContainer.setAttribute('data-photo-url', 'loading');
+    previewContainer.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="font-size:24px; color:var(--primary-color); display:flex; justify-content:center; align-items:center; height:100%;"></i>';
+    
     const reader = new FileReader();
     reader.onload = function(e) {
       // Compresser l'image pour éviter les dépassements de taille Firestore (max 1Mo) et optimiser la bande passante
       compressImage(e.target.result, 160, 160, 0.75, function(compressedData) {
         document.getElementById('form-avatar-preview-container').innerHTML = `<img src="${compressedData}" style="width:100%; height:100%; object-fit:cover;">`;
         document.getElementById('form-avatar-preview-container').setAttribute('data-photo-url', compressedData);
+        if (document.getElementById('btn-remove-photo')) document.getElementById('btn-remove-photo').style.display = 'inline-flex';
       });
     };
     reader.readAsDataURL(file);
@@ -1938,6 +1984,11 @@ function saveMemberForm(event) {
   const isNew = !memberId;
   
   const photo = document.getElementById('form-avatar-preview-container').getAttribute('data-photo-url') || "";
+  
+  if (photo === 'loading') {
+    showToast("Veuillez patienter pendant le traitement de la photo.", "warning");
+    return;
+  }
   
   // Rassembler Départements cochés
   const deptsChecked = [];
@@ -1998,7 +2049,7 @@ function saveMemberForm(event) {
   
   if (isNew) {
     payload.id = `mbr_${Date.now()}`;
-    if (!payload.photo) {
+    if (!payload.photo || payload.photo === 'removed') {
       const initials = (payload.prenoms[0] + payload.nom[0]).toUpperCase();
       payload.photo = generatePremiumSvgAvatar(initials, payload.sexe, DBEngine.getCollection('membres').length);
     }
@@ -2009,6 +2060,10 @@ function saveMemberForm(event) {
     const oldMbr = DBEngine.getCollection('membres').find(x => x.id === memberId);
     if (!photo && oldMbr) {
       payload.photo = oldMbr.photo;
+    }
+    if (photo === 'removed') {
+      const initials = (payload.prenoms[0] + payload.nom[0]).toUpperCase();
+      payload.photo = generatePremiumSvgAvatar(initials, payload.sexe, DBEngine.getCollection('membres').length);
     }
     DBEngine.update('membres', memberId, payload);
     showToast(`Fiche de ${payload.nom.toUpperCase()} ${payload.prenoms} mise à jour !`);
