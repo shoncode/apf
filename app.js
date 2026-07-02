@@ -3323,14 +3323,20 @@ async function handleLogin(event) {
     const email = identifiant.includes('@') ? identifiant : `${identifiant}@apflome.org`;
     if (firebase.auth) {
       await firebase.auth().signInWithEmailAndPassword(email, mdp);
-      // L'écouteur onAuthStateChanged gérera le rechargement de l'UI
+      window.location.reload();
     } else {
       errorEl.style.display = 'block';
       errorEl.innerText = "Erreur: Firebase Auth n'est pas initialisé.";
     }
   } catch (error) {
     errorEl.style.display = 'block';
-    errorEl.innerText = "Identifiant ou mot de passe incorrect.";
+    if (error.code === 'auth/invalid-credential') {
+      errorEl.innerText = "Mot de passe ou identifiant incorrect.";
+    } else if (error.code === 'auth/user-not-found') {
+      errorEl.innerText = "Ce compte n'existe pas dans Firebase.";
+    } else {
+      errorEl.innerText = `Erreur: ${error.message}`;
+    }
     console.error("Login error:", error);
   }
 }
