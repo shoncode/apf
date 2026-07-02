@@ -3313,27 +3313,38 @@ function handleCsvImport(event) {
 }
 
 // --- AUTHENTIFICATION ---
-function handleLogin(event) {
+async function handleLogin(event) {
   event.preventDefault();
   const identifiant = document.getElementById('login-id').value.trim();
   const mdp = document.getElementById('login-pwd').value;
+  const errorEl = document.getElementById('login-error');
   
-  const utilisateurs = DBEngine.getCollection('utilisateurs');
-  const user = utilisateurs.find(u => u.identifiant === identifiant && u.mot_de_passe === mdp);
-  
-  if (user) {
-    sessionStorage.setItem('ekklesia_auth', user.id);
-    window.location.reload();
-  } else {
-    const errorEl = document.getElementById('login-error');
+  try {
+    const email = identifiant.includes('@') ? identifiant : `${identifiant}@apf.tg`;
+    if (firebase.auth) {
+      await firebase.auth().signInWithEmailAndPassword(email, mdp);
+      // L'écouteur onAuthStateChanged gérera le rechargement de l'UI
+    } else {
+      errorEl.style.display = 'block';
+      errorEl.innerText = "Erreur: Firebase Auth n'est pas initialisé.";
+    }
+  } catch (error) {
     errorEl.style.display = 'block';
     errorEl.innerText = "Identifiant ou mot de passe incorrect.";
+    console.error("Login error:", error);
   }
 }
 
 function logout() {
-  sessionStorage.removeItem('ekklesia_auth');
-  window.location.reload();
+  if (firebase.auth) {
+    firebase.auth().signOut().then(() => {
+      sessionStorage.removeItem('ekklesia_auth');
+      window.location.reload();
+    });
+  } else {
+    sessionStorage.removeItem('ekklesia_auth');
+    window.location.reload();
+  }
 }
 
 // --- PARAMETRES DU COMPTE ---
@@ -3892,45 +3903,57 @@ window.addEventListener('DOMContentLoaded', async () => {
   // 1. Initialiser le moteur de persistance
   await DBEngine.init();
   
-  // 2. Vérification de la session
-  const activeUserId = sessionStorage.getItem('ekklesia_auth');
-  
-  if (!activeUserId) {
-    // Afficher l'écran de connexion
-    const appLayout = document.getElementById('app-layout');
-    const loginScreen = document.getElementById('login-screen');
-    if (appLayout) appLayout.style.display = 'none';
-    if (loginScreen) loginScreen.style.display = 'flex';
+  // 2. Vérification de la session via Firebase Auth
+  if (firebase.auth) {
+    firebase.auth().onAuthStateChanged(firebaseUser => {
+      const appLayout = document.getElementById('app-layout');
+      const loginScreen = document.getElementById('login-screen');
+
+      if (firebaseUser) {
+        // Trouver l'utilisateur interne correspondant à cet email
+        const identifiant = firebaseUser.email.split('@')[0];
+        const user = DBEngine.getCollection('utilisateurs').find(u => u.identifiant.toLowerCase() === identifiant.toLowerCase());
+        
+        if (user) {
+          sessionStorage.setItem('ekklesia_auth', user.id);
+          
+          if (loginScreen) loginScreen.style.display = 'none';
+          if (appLayout) appLayout.style.display = 'flex';
+          
+          // Mettre à jour l'en-tête de profil utilisateur actuel
+          const currentMember = DBEngine.getCollection('membres').find(m => m.id === user.membre_id);
+          if (currentMember) {
+            document.getElementById('current-user-name').innerText = `${currentMember.nom.toUpperCase()} ${currentMember.prenoms[0]}.`;
+            const roleEl = document.getElementById('current-user-role');
+            if (roleEl) roleEl.innerText = user.role;
+            document.getElementById('current-user-avatar').innerText = (currentMember.prenoms[0] + currentMember.nom[0]).toUpperCase();
+          }
+          
+          // Masquer la section Contributions pour les utilisateurs ayant le rôle "Responsable"
+          if (user.role === 'Responsable') {
+            const navFinances = document.getElementById('nav-item-finances');
+            const quickFinance = document.getElementById('quick-new-finance');
+            const tabContributions = document.getElementById('profile-tab-contributions');
+            if (navFinances) navFinances.style.display = 'none';
+            if (quickFinance) quickFinance.style.display = 'none';
+            if (tabContributions) tabContributions.style.display = 'none';
+          }
+          
+          // 3. Charger le tableau de bord
+          switchView(activeView || 'dashboard');
+        } else {
+          // Utilisateur non trouvé dans la base locale
+          firebase.auth().signOut();
+        }
+      } else {
+        // Non connecté
+        sessionStorage.removeItem('ekklesia_auth');
+        if (appLayout) appLayout.style.display = 'none';
+        if (loginScreen) loginScreen.style.display = 'flex';
+      }
+    });
   } else {
-    // Utilisateur connecté
-    const appLayout = document.getElementById('app-layout');
-    const loginScreen = document.getElementById('login-screen');
-    if (loginScreen) loginScreen.style.display = 'none';
-    if (appLayout) appLayout.style.display = 'flex';
-    
-    // Mettre à jour l'en-tête de profil utilisateur actuel
-    const user = DBEngine.getCollection('utilisateurs').find(u => u.id === activeUserId);
-    if (user) {
-      const currentMember = DBEngine.getCollection('membres').find(m => m.id === user.membre_id);
-      if (currentMember) {
-        document.getElementById('current-user-name').innerText = `${currentMember.nom.toUpperCase()} ${currentMember.prenoms[0]}.`;
-        const roleEl = document.getElementById('current-user-role');
-        if (roleEl) roleEl.innerText = user.role;
-        document.getElementById('current-user-avatar').innerText = (currentMember.prenoms[0] + currentMember.nom[0]).toUpperCase();
-      }
-      
-      // Masquer la section Contributions pour les utilisateurs ayant le rôle "Responsable"
-      if (user.role === 'Responsable') {
-        const navFinances = document.getElementById('nav-item-finances');
-        const quickFinance = document.getElementById('quick-new-finance');
-        const tabContributions = document.getElementById('profile-tab-contributions');
-        if (navFinances) navFinances.style.display = 'none';
-        if (quickFinance) quickFinance.style.display = 'none';
-        if (tabContributions) tabContributions.style.display = 'none';
-      }
-    }
-    
-    // 3. Charger le tableau de bord par défaut
-    switchView('dashboard');
+    // Fallback si Firebase Auth n'est pas chargé (mode hors ligne / sans sync)
+    console.warn("Firebase Auth non disponible, fonctionnement hors-ligne basique non pris en charge pour la connexion.");
   }
 });
