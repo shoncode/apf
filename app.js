@@ -618,7 +618,7 @@ const DBEngine = {
       } else {
         // Fallback de secours pour garantir la synchronisation si fetch() échoue (ex: fichiers locaux sur mobile)
         const fallbackConfig = {
-          apiKey: "AIzaSyCt6z4oF7ckHgnRUCAyod9KCurxPqtrWDU",
+          apiKey: "AIzaSyCt6z4oF7ckHgnRuCAyod9KCurxPqtRwDU",
           authDomain: "ekklesia-apf.firebaseapp.com",
           projectId: "ekklesia-apf",
           storageBucket: "ekklesia-apf.firebasestorage.app",
