@@ -58,7 +58,7 @@ function generatePremiumSvgAvatar(initials, gender, index = 0) {
 const initialSeedData = {
   utilisateurs: [
     { id: "usr_1", membre_id: "mbr_1", identifiant: "pasteur", mot_de_passe: "apf2026", role: "Administrateur" },
-    { id: "usr_2", membre_id: "mbr_2", identifiant: "secretariat", mot_de_passe: "apf2026", role: "Secrétaire" }
+    { id: "usr_2", membre_id: "mbr_2", identifiant: "assistant", mot_de_passe: "apf2026", role: "Secrétaire" }
   ],
   cellules: [
     { id: "cell_1", nom: "Adidogomé A" },
@@ -3320,7 +3320,7 @@ async function handleLogin(event) {
   const errorEl = document.getElementById('login-error');
   
   try {
-    const email = identifiant.includes('@') ? identifiant : `${identifiant}@apf.tg`;
+    const email = identifiant.includes('@') ? identifiant : `${identifiant}@apflome.org`;
     if (firebase.auth) {
       await firebase.auth().signInWithEmailAndPassword(email, mdp);
       // L'écouteur onAuthStateChanged gérera le rechargement de l'UI
