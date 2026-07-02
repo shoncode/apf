@@ -3551,7 +3551,7 @@ function openNewUserForm() {
   document.getElementById('new-user-form-area').style.display = 'block';
 }
 
-function createNewUser(event) {
+async function createNewUser(event) {
   event.preventDefault();
   const membreId = document.getElementById('new-user-member').value;
   const identifiant = document.getElementById('new-user-id').value.trim();
@@ -3572,6 +3572,27 @@ function createNewUser(event) {
     return;
   }
   
+  // 1. Création dans Firebase Authentication (avec une app secondaire pour ne pas déconnecter l'admin)
+  if (firebase.auth) {
+    try {
+      const email = identifiant.includes('@') ? identifiant : `${identifiant}@apflome.org`;
+      let secondaryApp;
+      try {
+        secondaryApp = firebase.app("SecondaryApp");
+      } catch (e) {
+        secondaryApp = firebase.initializeApp(firebase.app().options, "SecondaryApp");
+      }
+      
+      await secondaryApp.auth().createUserWithEmailAndPassword(email, mdp);
+      await secondaryApp.auth().signOut();
+    } catch (error) {
+      errorEl.style.display = 'block';
+      errorEl.innerText = "Erreur Firebase: " + error.message;
+      return;
+    }
+  }
+
+  // 2. Enregistrement dans la base de données locale / Firestore
   const newUser = {
     id: 'usr_' + Date.now(),
     membre_id: membreId,
