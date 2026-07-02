@@ -596,9 +596,9 @@ const DBEngine = {
     let configString = null;
     let enabled = false;
 
-    // 1. Tenter de charger le fichier firebase-config.json hébergé sur le serveur
+    // 1. Tenter de charger le fichier firebase-config.json hébergé sur le serveur (avec anti-cache)
     try {
-      const response = await fetchWithTimeout('./firebase-config.json');
+      const response = await fetchWithTimeout('./firebase-config.json?t=' + new Date().getTime());
       if (response.ok) {
         const configJson = await response.json();
         configString = JSON.stringify(configJson);
